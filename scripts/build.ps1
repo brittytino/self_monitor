@@ -37,17 +37,53 @@ if ($vcvars) {
 }
 else {
     cargo build --release --bin time_authority_service
+    if ($LASTEXITCODE -ne 0) { throw "Backend Build Failed" }
+    
+    Copy-Item "categories.json" "target\release\categories.json" -Force
 }
 if ($LASTEXITCODE -ne 0) { Write-Error "Backend Build Failed."; exit 1 }
 
-# 6. Build Frontend & UI Bundle (Tauri CLI)
-Write-Host "Building UI Bundle..." -ForegroundColor Cyan
-Push-Location gui
-npm install
-npm run tauri build
-if ($LASTEXITCODE -ne 0) { Write-Error "Tauri Build Failed."; Pop-Location; exit 1 }
-Pop-Location
+# 3. Build UI
+Write-Host "Building UI (Tauri)..." -ForegroundColor Cyan
+if (Test-Path "$PSScriptRoot\..\gui") {
+    Push-Location "$PSScriptRoot\..\gui"
+    # Ensure dependencies are installed if needed, or just build
+    # npm install # (Skipped for speed over repeated runs, assume installed)
+    
+    npm run tauri build
+    if ($LASTEXITCODE -ne 0) { 
+        Pop-Location
+        throw "Tauri Build Failed." 
+    }
+    Pop-Location
+
+    # 4. Consolidate Artifacts (Production Layout)
+    Write-Host "Consolidating Production Binaries..." -ForegroundColor Cyan
+    
+    $releaseDir = "$PSScriptRoot\..\target\release"
+    $uiSource = "$PSScriptRoot\..\gui\src-tauri\target\release\time_authority_ui.exe"
+    
+    if (Test-Path $uiSource) {
+        Copy-Item $uiSource "$releaseDir\time_authority_ui.exe" -Force
+        
+        # Also copy webview2 loader if present (needed for some systems)
+        $loader = "$PSScriptRoot\..\gui\src-tauri\target\release\WebView2Loader.dll"
+        if (Test-Path $loader) {
+            Copy-Item $loader "$releaseDir\WebView2Loader.dll" -Force
+        }
+    } else {
+        Write-Error "UI Binary not found after build!"
+    }
+} else {
+    Write-Error "GUI directory not found."
+    exit 1
+}
 
 Write-Host "Build Complete!" -ForegroundColor Green
+Write-Host "Artifacts are in: target\release\"
+Write-Host "  [1] time_authority_service.exe (Backend)"
+Write-Host "  [2] time_authority_ui.exe (Frontend)"
+Write-Host "  [3] self_monitor.db (Database)"
+
 Write-Host "Service: target\release\time_authority_service.exe"
 Write-Host "UI: gui\src-tauri\target\release\time_authority_ui.exe"

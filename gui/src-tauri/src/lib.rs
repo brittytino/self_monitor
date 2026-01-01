@@ -31,23 +31,31 @@ fn get_db_path() -> PathBuf {
     // Actually, simpler: Look for it in the service build output location relative to CWD of the app
     // For production (installed), it should be in the same folder.
     
+    // Simplified: Always look next to executable first (Production/Same-Folder), then check dev paths.
+    // Since we will move the UI to the same folder as the service in build.ps1, this is robust.
     let exe = std::env::current_exe().unwrap_or_default();
     let dir = exe.parent().unwrap_or(Path::new("."));
     
-    // Check if we are in dev mode (cargo run) -> db might be in ../../../target/release/self_monitor.db
-    let dev_path = dir.join("../../../target/release/self_monitor.db");
-    if dev_path.exists() {
-        return dev_path;
+    let sibling_db = dir.join("self_monitor.db");
+    if sibling_db.exists() {
+        return sibling_db;
     }
 
-    // Default to sibling (prod)
-    dir.join("self_monitor.db")
+    // fallback for dev (cargo tauri dev)
+    // CWD is usually src-tauri
+    // DB is in target/release/self_monitor.db (from root) -> ../../target/release/self_monitor.db
+    if Path::new("../../target/release/self_monitor.db").exists() {
+        return PathBuf::from("../../target/release/self_monitor.db");
+    }
+
+    // fallback default
+    sibling_db
 }
 
 #[command]
 fn get_dashboard_stats() -> Result<DashboardStats, String> {
     let db_path = get_db_path();
-    let conn = Connection::open(&db_path).map_err(|e| format!("DB Error: {}", e))?;
+    let conn = Connection::open(&db_path).map_err(|e| format!("DB Error at {:?}: {}", db_path, e))?;
 
     // 1. Streaks
     let mut streak = 0;
@@ -66,33 +74,29 @@ fn get_dashboard_stats() -> Result<DashboardStats, String> {
         }
     }
 
-    // 2. Today Stats (Live Calc)
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let mut prod = 0;
-    let mut dist = 0;
+    // 2. Today Stats (Read Only from intraday_stats)
+    let mut effective_minutes = 0; // minutes
+    let mut distracting_minutes = 0; // minutes
 
-    let mut check_sessions = conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='activity_sessions'").map_err(|e| e.to_string())?;
-    if check_sessions.query([]).map_err(|e| e.to_string())?.next().unwrap_or(None).is_some() {
-        let mut stmt = conn.prepare("SELECT category, SUM(duration_seconds) FROM activity_sessions WHERE date = ?1 GROUP BY category").map_err(|e| e.to_string())?;
-        let mut rows = stmt.query([&today]).map_err(|e| e.to_string())?;
-        while let Ok(Some(row)) = rows.next() {
-            let cat: String = row.get(0).unwrap_or_default();
-            let dur: i64 = row.get(1).unwrap_or(0);
-            let c = cat.to_lowercase();
-            if c == "productive" { prod += dur; }
-            else if c == "distracting" { dist += dur; }
+    // Check if table exists (race condition safety)
+    let mut check_live = conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='intraday_stats'").map_err(|e| e.to_string())?;
+    if check_live.query([]).map_err(|e| e.to_string())?.next().unwrap_or(None).is_some() {
+        let mut stmt = conn.prepare("SELECT effective_work_seconds, distracting_seconds FROM intraday_stats WHERE id = 1").map_err(|e| e.to_string())?;
+        let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+        if let Ok(Some(row)) = rows.next() {
+            let eff_sec: i64 = row.get(0).unwrap_or(0);
+            let dist_sec: i64 = row.get(1).unwrap_or(0);
+            
+            effective_minutes = eff_sec / 60;
+            distracting_minutes = dist_sec / 60;
         }
     }
-
-    // Strict Formula: effective = prod - (dist * 0.75)
-    let penalty = (dist as f64 * 0.75) as i64;
-    let effective = std::cmp::max(0, prod - penalty);
 
     Ok(DashboardStats {
         streak,
         best_streak,
-        today_productivity_min: effective / 60, // Return Effective !
-        today_distraction_min: dist / 60,
+        today_productivity_min: effective_minutes,
+        today_distraction_min: distracting_minutes,
     })
 }
 
@@ -126,23 +130,33 @@ fn get_recent_activity() -> Result<Vec<ActivityLog>, String> {
 
 #[command]
 fn get_service_status() -> String {
-    let output = Command::new("sc")
-        .arg("query")
-        .arg("SelfMonitorService")
-        .output();
+    // Passive Check: Is the Service writing to the DB or Log?
+    // This avoids spawning "tasklist.exe" which causes black screens/flashing.
+    
+    let db_path = get_db_path();
+    // Also check service.log as a backup or primary indicator of life
+    let exe = std::env::current_exe().unwrap_or_default();
+    let dir = exe.parent().unwrap_or(Path::new("."));
+    let log_path = dir.join("service.log");
 
-    match output {
-        Ok(o) => {
-             let stdout = String::from_utf8_lossy(&o.stdout);
-             if stdout.contains("RUNNING") {
-                 "Running".to_string()
-             } else if stdout.contains("STOPPED") {
-                 "Stopped".to_string()
-             } else {
-                 "Unknown".to_string()
-             }
-        },
-        Err(_) => "Unknown".to_string(),
+    let check_file = |path: &Path| -> bool {
+        if let Ok(metadata) = std::fs::metadata(path) {
+            if let Ok(modified) = metadata.modified() {
+                if let Ok(elapsed) = modified.elapsed() {
+                    // Service writes every 10s. Allow 20s buffer. 
+                    // Say 30s to be safe.
+                    return elapsed.as_secs() < 30;
+                }
+            }
+        }
+        false
+    };
+
+    if check_file(&db_path) || check_file(&log_path) {
+        "Running".to_string()
+    } else {
+        // If neither file is touched in 30s, likely stopped
+        "Stopped (No Heartbeat)".to_string()
     }
 }
 

@@ -55,3 +55,17 @@ CREATE TABLE IF NOT EXISTS streaks (
 -- Initialize streak row if not exists
 INSERT OR IGNORE INTO streaks (id, current_streak, best_streak, last_evaluated_date)
 VALUES (1, 0, 0, NULL);
+
+-- 5. INTRADAY LIVE STATS (Volatile, Service-computed)
+-- Service updates this every minute for the UI to read ONLY.
+CREATE TABLE IF NOT EXISTS intraday_stats (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    date TEXT NOT NULL,
+    productive_seconds INTEGER NOT NULL DEFAULT 0,
+    distracting_seconds INTEGER NOT NULL DEFAULT 0,
+    effective_work_seconds INTEGER NOT NULL DEFAULT 0,
+    updated_at_utc INTEGER NOT NULL
+);
+
+INSERT OR IGNORE INTO intraday_stats (id, date, productive_seconds, distracting_seconds, effective_work_seconds, updated_at_utc)
+VALUES (1, '1970-01-01', 0, 0, 0, 0);

@@ -3,7 +3,7 @@ use std::path::Path;
 use chrono::Utc;
 
 pub struct AppDatabase {
-    conn: Connection,
+    pub conn: Connection,
 }
 
 impl AppDatabase {
@@ -140,6 +140,15 @@ impl AppDatabase {
         self.conn.execute(
             "UPDATE streaks SET current_streak = ?1, best_streak = ?2, last_evaluated_date = ?3 WHERE id = 1",
             params![new_current, new_best, evaluated_date]
+        )?;
+        Ok(())
+    }
+
+    pub fn update_intraday_stats(&self, date: &str, prod: i64, distract: i64, effective: i64) -> Result<()> {
+        let now = Utc::now().timestamp();
+        self.conn.execute(
+            "UPDATE intraday_stats SET date = ?1, productive_seconds = ?2, distracting_seconds = ?3, effective_work_seconds = ?4, updated_at_utc = ?5 WHERE id = 1",
+            params![date, prod, distract, effective, now]
         )?;
         Ok(())
     }

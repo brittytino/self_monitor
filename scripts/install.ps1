@@ -36,3 +36,9 @@ New-Service -Name $serviceName -BinaryPathName $binPath -DisplayName "Time Autho
 
 Start-Service $serviceName
 Write-Host "Service Installed and Started."
+
+# Configure Restart on Failure (Reliability)
+# Reset failure count after 1 day (86400s). Restart service after 60s (60000ms) for 1st, 2nd, and subsequent failures.
+$cmd = "failure $serviceName reset= 86400 actions= restart/60000/restart/60000/restart/60000"
+Start-Process -FilePath "sc.exe" -ArgumentList $cmd -NoNewWindow -Wait
+Write-Host "Service Recovery Configured (Restart on Crash)."

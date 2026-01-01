@@ -94,7 +94,7 @@ const Dashboard = ({ stats, activities }) => {
           <StatBox label="Streak" value={stats.streak} color="text-accent" />
           <StatBox label="High Score" value={stats.best_streak} />
           <StatBox label="Distraction" value={`${stats.today_distraction_min}m`} color="text-red-400" />
-          <StatBox label="Status" value={stats.today_productivity_min >= 180 ? "QUALIFIED" : "PENDING"} color={stats.today_productivity_min >= 180 ? "text-accent" : "text-yellow-500"} />
+          <StatBox label="Status" value={stats.today_productivity_min >= 120 ? "QUALIFIED" : "PENDING"} color={stats.today_productivity_min >= 120 ? "text-accent" : "text-yellow-500"} />
         </div>
 
         {/* Main Gauge Area */}
@@ -106,13 +106,13 @@ const Dashboard = ({ stats, activities }) => {
             <p className="text-secondary text-sm max-w-xs mb-6 leading-relaxed">
               Effective work is calculated by subtracting distraction penalty from raw productivity.
             </p>
-            <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${stats.today_productivity_min >= 180 ? "bg-accent/10 text-accent border border-accent/20" : "bg-yellow-500/10 text-yellow-500 border border-yellow-500/20"}`}>
+            <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${stats.today_productivity_min >= 120 ? "bg-accent/10 text-accent border border-accent/20" : "bg-yellow-500/10 text-yellow-500 border border-yellow-500/20"}`}>
               <span className="w-2 h-2 rounded-full bg-current animate-pulse"></span>
-              {stats.today_productivity_min >= 180 ? "TARGET MET" : "ACQUIRING..."}
+              {stats.today_productivity_min >= 120 ? "TARGET MET" : "ACQUIRING..."}
             </div>
           </div>
 
-          <Gauge value={stats.today_productivity_min} label="MINUTES" />
+          <Gauge value={stats.today_productivity_min} max={120} label="MINUTES" />
         </div>
       </div>
 

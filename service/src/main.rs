@@ -15,7 +15,8 @@ use windows_service::{define_windows_service, service_dispatcher};
 
 mod db;
 mod watcher;
-mod engine; 
+mod engine;
+mod config;
 
 use db::AppDatabase;
 use watcher::SystemWatcher;
@@ -173,8 +174,18 @@ fn run_service_logic(shutdown_rx: Option<std::sync::mpsc::Receiver<()>>) -> wind
             error!("Daily evaluation failed: {}", e);
         }
 
-        // 60 seconds sampling interval as per spec
-        thread::sleep(Duration::from_secs(60));
+        // Update Intraday Live Stats (UI Read-Only Source)
+        if let Err(e) = SessionEngine::update_live_stats(&db) {
+            error!("Live stats update failed: {}", e);
+        }
+
+        // ENFORCEMENT: Block distracting apps if below target using the recently updated stats
+        if let Err(e) = SessionEngine::enforce_policy(&db, &app, &title) {
+            error!("Enforcement failed: {}", e);
+        }
+
+        // 10 seconds sampling interval for dynamic UI updates (User Request)
+        thread::sleep(Duration::from_secs(10));
     }
     
     Ok(())

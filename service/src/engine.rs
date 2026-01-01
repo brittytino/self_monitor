@@ -1,7 +1,7 @@
 use crate::db::AppDatabase;
 use rusqlite::Result;
 use log::info;
-use chrono::{Utc, TimeZone};
+use chrono::TimeZone;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Category {
@@ -25,47 +25,38 @@ impl Category {
     }
 
     /// Strict Pessimistic Categorization
-    /// Distracting > Productive > Recovery > Neutral
+    /// Config-driven via categories.json
     pub fn classify(app_name: &str, window_title: &str, is_idle: bool) -> Self {
         if is_idle {
             return Category::Idle;
         }
 
+        let rules = crate::config::load_rules();
         let app = app_name.to_lowercase();
         let title = window_title.to_lowercase();
 
         // 1. DISTRACTING (Highest Priority)
-        // Social Media, Games, Streaming, NSFW
-        if app.contains("steam") || app.contains("discord") || app.contains("spotify") {
-            return Category::Distracting;
-        }
-        if title.contains("instagram") || title.contains("reddit") || title.contains("youtube") || title.contains("facebook") || title.contains("twitter") || title.contains("x.com") {
-            return Category::Distracting;
-        }
-        // NSFW keywords (generic examples)
-        if title.contains("porn") || title.contains("xxx") {
-            return Category::Distracting;
+        for keyword in &rules.distracting {
+            if app.contains(keyword) || title.contains(keyword) {
+                return Category::Distracting;
+            }
         }
 
         // 2. PRODUCTIVE
-        // Dev tools, Office, Learning
-        if app.contains("code") || app.contains("rust") || app.contains("terminal") || app.contains("powershell") || app.contains("cmd") {
-            return Category::Productive;
-        }
-        if app.contains("word") || app.contains("excel") || app.contains("notepad") {
-            return Category::Productive;
-        }
-        if title.contains("github") || title.contains("stackoverflow") || title.contains("docs") || title.contains("learning") {
-            return Category::Productive;
+        for keyword in &rules.productive {
+            if app.contains(keyword) || title.contains(keyword) {
+                return Category::Productive;
+            }
         }
 
         // 3. RECOVERY
-        // Music (if not distracting), stretching? Strict logic says Spotify is distracting if browsing, but maybe background?
-        // Spec: "30 min YouTube 'learning' + 1 NSFW tab = Distracting".
-        // We'll keep Recovery rare for now.
-        
+        for keyword in &rules.recovery {
+            if app.contains(keyword) || title.contains(keyword) {
+                return Category::Recovery;
+            }
+        }
+
         // 4. NEUTRAL (Default)
-        // System stuff, generic browsing
         Category::Neutral
     }
 }
@@ -132,14 +123,10 @@ impl SessionEngine {
         // Duration: Time diff + 60s (inclusive of the last minute tick)
         let duration = (end.timestamp_utc - start.timestamp_utc) + 60;
         
-        // --- PART A: CATEGORIZATION LOGIC ---
-        // "If any log within a session is distracting, the entire session is distracting."
         let mut found_distracting = false;
         let mut found_productive = false;
         let mut found_recovery = false;
 
-        // Check strict priority: Distracting > Productive > Recovery > Neutral
-        // Check strict priority: Distracting > Productive > Recovery > Neutral
         for log in logs {
             let cat = Category::classify(&log.app_name, &log.window_title, log.is_idle);
             match cat {
@@ -157,11 +144,12 @@ impl SessionEngine {
         } else if found_recovery {
              Category::Recovery
         } else {
-             // Default to start classification or Neutral
              Category::classify(&start.app_name, &start.window_title, start.is_idle)
         };
 
-        let date_str = Utc.timestamp_opt(start.timestamp_utc, 0).unwrap().format("%Y-%m-%d").to_string();
+        // FIXED: Use Local time for Date boundaries to match User Experience
+        let start_dt = chrono::Local.timestamp_opt(start.timestamp_utc, 0).unwrap();
+        let date_str = start_dt.format("%Y-%m-%d").to_string();
 
         db.insert_session(
             &date_str,
@@ -178,19 +166,7 @@ impl SessionEngine {
     }
 
     pub fn evaluate_history(db: &AppDatabase) -> Result<()> {
-        // "Runs when a calendar date has no existing summary"
-        // Check past days that have sessions but no summary.
-        
-        // We use `Local` to determine "yesterday" in user's timezone, 
-        // but logs are UTC. The `date` column in sessions is stored as YYYY-MM-DD.
-        // Ideally this `date` was derived from Local time? 
-        // In `flush_session` above, we used `Utc`. This might be a timezone bug.
-        // The Specification says "Midnight local time".
-        // `DailyEvaluator` should run for any `date` in `activity_sessions` that is NOT in `daily_summaries`
-        // AND is strictly in the past (i.e. date < today).
-        
         let today_local = chrono::Local::now().format("%Y-%m-%d").to_string();
-        
         let pending_days = db.get_unsummarized_days(&today_local)?;
 
         for date in pending_days {
@@ -204,32 +180,23 @@ impl SessionEngine {
         let totals = db.get_day_category_totals(date)?;
 
         let mut productive: i64 = 0;
-        let mut neutral: i64 = 0;
-        let mut recovery: i64 = 0;
         let mut distracting: i64 = 0;
-        let mut idle: i64 = 0;
 
         for (cat, duration) in totals {
             match cat.as_str() {
                 "productive" | "Productive" => productive += duration,
-                "neutral" | "Neutral" => neutral += duration,
-                "recovery" | "Recovery" => recovery += duration,
                 "distracting" | "Distracting" => distracting += duration,
-                "idle" | "Idle" => idle += duration,
                 _ => {}
             }
         }
 
-        // --- PART A: EFFECTIVE WORK FORMULA ---
-        // effective_work_seconds = productive_seconds − (distracting_seconds × 0.75)
         let penalty = (distracting as f64 * 0.75) as i64;
         let effective_work = std::cmp::max(0, productive - penalty);
 
-        // --- PART A: QUALIFICATION ---
         // effective_work_seconds ≥ DAILY_TARGET (e.g. 4 hours)
         // AND distracting_seconds ≤ DISTRACTION_LIMIT (e.g. 20 mins? Spec says "defined in config", user image "4 hours" target)
-        // Let's set reasonable strict defaults.
-        const DAILY_TARGET: i64 = 3 * 3600; // 3 Hours Deep Work
+        // User Requested: 2 Hours (120 mins)
+        const DAILY_TARGET: i64 = 2 * 3600; // 2 Hours Deep Work
         const DISTRACTION_LIMIT: i64 = 45 * 60; // 45 Mins max
 
         let qualified = effective_work >= DAILY_TARGET && distracting <= DISTRACTION_LIMIT;
@@ -244,46 +211,122 @@ impl SessionEngine {
             }
         };
 
+        // For summary, we can default unused stats to 0 or calc them if needed. 
+        // We focus on the strict ones.
         let summary = crate::db::DailySummary {
             date: date.to_string(),
             productive,
-            neutral,
-            recovery,
+            neutral: 0,
+            recovery: 0,
             distracting,
-            idle,
+            idle: 0,
             effective_work,
             qualified,
             reason,
         };
 
-        // Persistence: "After this write, the day is sealed forever."
         db.insert_daily_summary(&summary)?;
 
-        // --- PART A: STREAK LOGIC ---
-        // "Streaks do not forgive. They only remember."
-        
         let (mut current_streak, mut best_streak, last_eval_date_opt) = db.get_streak_info()?;
         
-        // Prevent double counting if something weird happens (though unsummarized query prevents it)
         if let Some(last_date) = last_eval_date_opt {
-            if last_date == date {
-                return Ok(());
-            }
+            if last_date == date { return Ok(()); }
         }
 
         if qualified {
             current_streak += 1;
-            if current_streak > best_streak {
-                best_streak = current_streak;
-            }
+            if current_streak > best_streak { best_streak = current_streak; }
         } else {
             current_streak = 0;
         }
 
         db.update_streak(current_streak, best_streak, date)?;
-        
         info!("Day {} Finalized. Qualified: {}. Streak: {}", date, qualified, current_streak);
 
+        Ok(())
+    }
+
+    pub fn update_live_stats(db: &AppDatabase) -> Result<()> {
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        
+        // 1. Committed Sessions (Completed)
+        let totals = db.get_day_category_totals(&today)?;
+        
+        let mut productive: i64 = 0;
+        let mut distracting: i64 = 0;
+        
+        for (cat, duration) in totals {
+            match cat.to_lowercase().as_str() {
+                "productive" => productive += duration,
+                "distracting" => distracting += duration,
+                _ => {}
+            }
+        }
+        
+        // 2. Pending Logs (Active Session)
+        let last_session_end = db.get_last_session_end_time()?.unwrap_or(0);
+        let pending_logs = db.get_logs_since(last_session_end)?;
+        
+        for log in pending_logs {
+             let log_dt = chrono::Local.timestamp_opt(log.timestamp_utc, 0).unwrap();
+             if log_dt.format("%Y-%m-%d").to_string() == today {
+                 let cat = Category::classify(&log.app_name, &log.window_title, log.is_idle);
+                 match cat {
+                     Category::Productive => productive += 60,
+                     Category::Distracting => distracting += 60,
+                     _ => {}
+                 }
+             }
+        }
+
+        // Strict Formula
+        let penalty = (distracting as f64 * 0.75) as i64;
+        let effective = std::cmp::max(0, productive - penalty);
+        
+        db.update_intraday_stats(&today, productive, distracting, effective)?;
+        
+        Ok(())
+    }
+
+    /// Strict Enforcement: "Block every other app until 120 mins"
+    pub fn enforce_policy(db: &AppDatabase, current_app: &str, current_title: &str) -> Result<()> {
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        
+        // Check current status
+        // Efficient way: read intraday_stats directly (it was just updated)
+        // But for strictness let's assume we called update_live_stats first.
+        
+        // Using raw query for speed
+        let mut stmt = db.conn.prepare("SELECT effective_work_seconds FROM intraday_stats WHERE id = 1 AND date = ?1")?;
+        let mut rows = stmt.query([&today])?;
+        
+        let effective_work: i64 = if let Some(row) = rows.next()? {
+            row.get(0)?
+        } else {
+            0
+        };
+
+        const TARGET: i64 = 2 * 3600; // 120 Minutes
+
+        if effective_work < TARGET {
+            // "Until that (120m), every other app (Distracting) will be blocked"
+            let cat = Category::classify(current_app, current_title, false);
+            
+            if cat == Category::Distracting {
+                info!("ENFORCEMENT: Blocking {} (Target not met: {}/{})", current_app, effective_work, TARGET);
+                
+                // Kill Process
+                use std::process::Command;
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x08000000;
+                
+                let _ = Command::new("taskkill")
+                    .args(&["/F", "/IM", current_app])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .output();
+            }
+        }
+        
         Ok(())
     }
 }
