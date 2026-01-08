@@ -1,0 +1,30 @@
+# Rust
+/service/target/
+/target/
+**/*.rs.bk
+
+# Gradle / Kotlin
+.gradle/
+build/
+*/build/
+*.iml
+.idea/
+local.properties
+
+# Android
+*.apk
+*.ap_
+*.dex
+bin/
+
+# DB
+*.db
+*.db-shm
+*.db-wal
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log

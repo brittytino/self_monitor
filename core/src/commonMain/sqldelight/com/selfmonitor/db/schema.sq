@@ -1,0 +1,66 @@
+CREATE TABLE rawEvent (
+    id TEXT NOT NULL PRIMARY KEY,
+    timestamp INTEGER NOT NULL, -- UTC Epoch Milliseconds
+    device_id TEXT NOT NULL,
+    app_pkg_name TEXT NOT NULL,
+    window_title TEXT,
+    is_idle INTEGER NOT NULL DEFAULT 0 -- 0 or 1
+);
+
+CREATE TABLE session (
+    id TEXT NOT NULL PRIMARY KEY,
+    start_time INTEGER NOT NULL,
+    end_time INTEGER NOT NULL,
+    category TEXT NOT NULL, -- WORK, DISTRACTION, NEUTRAL
+    duration_sec INTEGER NOT NULL
+);
+
+CREATE TABLE dailyLog (
+    date TEXT NOT NULL PRIMARY KEY, -- YYYY-MM-DD
+    total_work_sec INTEGER NOT NULL,
+    total_distraction_sec INTEGER NOT NULL,
+    verdict TEXT NOT NULL, -- GREEN, YELLOW, RED
+    manual_leetcode INTEGER DEFAULT 0, -- 0 or 1
+    manual_sugar INTEGER DEFAULT 0,
+    manual_diet INTEGER DEFAULT 0
+);
+
+CREATE TABLE appRule (
+    pkg_name_pattern TEXT NOT NULL PRIMARY KEY,
+    category TEXT NOT NULL
+);
+
+-- Queries
+
+insertRawEvent:
+INSERT OR REPLACE INTO rawEvent(id, timestamp, device_id, app_pkg_name, window_title, is_idle)
+VALUES (?, ?, ?, ?, ?, ?);
+
+selectAllRawEvents:
+SELECT * FROM rawEvent ORDER BY timestamp ASC;
+
+insertSession:
+INSERT OR REPLACE INTO session(id, start_time, end_time, category, duration_sec)
+VALUES (?, ?, ?, ?, ?);
+
+getSessionsForRange:
+SELECT * FROM session 
+WHERE start_time >= ? AND end_time <= ? 
+ORDER BY start_time ASC;
+
+insertDailyLog:
+INSERT OR REPLACE INTO dailyLog(date, total_work_sec, total_distraction_sec, verdict, manual_leetcode, manual_sugar, manual_diet)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+getDailyLog:
+SELECT * FROM dailyLog WHERE date = ?;
+
+upsertAppRule:
+INSERT OR REPLACE INTO appRule(pkg_name_pattern, category)
+VALUES (?, ?);
+
+getAllRules:
+SELECT * FROM appRule;
+
+getRuleForApp:
+SELECT * FROM appRule WHERE pkg_name_pattern = ?;
