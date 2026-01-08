@@ -25,6 +25,7 @@ kotlin {
                 // Android specific system libs
                 implementation("androidx.core:core-ktx:1.12.0")
                 implementation("androidx.work:work-runtime-ktx:2.9.0") // For background jobs
+                implementation("androidx.security:security-crypto:1.0.0")
             }
         }
         val desktopMain by getting {

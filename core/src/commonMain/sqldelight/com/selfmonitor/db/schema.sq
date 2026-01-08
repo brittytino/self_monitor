@@ -30,6 +30,11 @@ CREATE TABLE appRule (
     category TEXT NOT NULL
 );
 
+CREATE TABLE systemConfig (
+    key TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 -- Queries
 
 insertRawEvent:
@@ -64,3 +69,28 @@ SELECT * FROM appRule;
 
 getRuleForApp:
 SELECT * FROM appRule WHERE pkg_name_pattern = ?;
+
+CREATE TABLE sync_state (
+    entity_name TEXT NOT NULL PRIMARY KEY, -- 'raw_event', 'daily_log', 'app_rule', 'system_config'
+    last_pushed_at INTEGER, -- Timestamp
+    last_pulled_at INTEGER, -- Timestamp
+    pending_push_count INTEGER NOT NULL DEFAULT 0
+);
+
+-- Queries for Sync State
+getSyncState:
+SELECT * FROM sync_state WHERE entity_name = ?;
+
+updateSyncState:
+INSERT OR REPLACE INTO sync_state(entity_name, last_pushed_at, last_pulled_at, pending_push_count)
+VALUES (?, ?, ?, ?);
+
+getAllSyncStates:
+SELECT * FROM sync_state;
+
+-- Config Queries
+getConfig:
+SELECT value FROM systemConfig WHERE key = ?;
+
+setConfig:
+INSERT OR REPLACE INTO systemConfig(key, value) VALUES (?, ?);

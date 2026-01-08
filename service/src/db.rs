@@ -2,6 +2,7 @@ use rusqlite::{params, Connection, Result};
 use uuid::Uuid;
 
 pub fn init_tables(conn: &Connection) -> Result<()> {
+    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS rawEvent (
             id TEXT NOT NULL PRIMARY KEY,

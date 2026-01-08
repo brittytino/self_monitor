@@ -23,7 +23,8 @@ class RulesEngineTest {
         
         val verdict = engine.evaluateDay(
             sessions = workSessions + distractionSessions,
-            manualInputs = ManualInputs(leetcodeSolved = true, sugarAvoided = true, dietFollowed = true)
+            manualInputs = ManualInputs(leetcodeSolved = true, sugarAvoided = true, dietFollowed = true),
+            config = DailyConfig()
         )
         
         assertEquals(DailyVerdict.GREEN, verdict)
@@ -37,7 +38,8 @@ class RulesEngineTest {
         
         val verdict = engine.evaluateDay(
             sessions = sessions,
-            manualInputs = ManualInputs(leetcodeSolved = true, sugarAvoided = true, dietFollowed = true)
+            manualInputs = ManualInputs(leetcodeSolved = true, sugarAvoided = true, dietFollowed = true),
+            config = DailyConfig()
         )
         
         assertEquals(DailyVerdict.RED, verdict)
@@ -53,7 +55,8 @@ class RulesEngineTest {
         
         val verdict = engine.evaluateDay(
             sessions = sessions,
-            manualInputs = ManualInputs(leetcodeSolved = false, sugarAvoided = true, dietFollowed = true)
+            manualInputs = ManualInputs(leetcodeSolved = false, sugarAvoided = true, dietFollowed = true),
+            config = DailyConfig()
         )
         
         assertEquals(DailyVerdict.RED, verdict)
